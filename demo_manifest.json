@@ -1,0 +1,8 @@
+{
+  "kind": "synthetic",
+  "source": "seed42 generated noise",
+  "return_definition": "simple daily synthetic returns",
+  "roll_method": "none",
+  "currency": "USD",
+  "reviewed": false
+}
