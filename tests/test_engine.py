@@ -29,4 +29,20 @@ class Tests(unittest.TestCase):
  def test_holdout(self):
   rows,_=self.run_engine(cfg={**self.cfg,'evaluation_start':'2020-01-01'})
   self.assertTrue(all(x['date']>='2020-01-01' for x in rows));self.assertAlmostEqual(rows[0]['equity'],10000*(1+rows[0]['net_return']))
+ def test_financing_and_borrow_reduce_returns(self):
+  zero,_=self.run_engine(cfg={**self.cfg,'financing_rate':0,'borrow_rate':0})
+  charged,_=self.run_engine(cfg={**self.cfg,'financing_rate':0.04,'borrow_rate':0.02})
+  self.assertLess(charged[-1]['equity'],zero[-1]['equity'])
+  self.assertTrue(any(x['financing_cost']>0 for x in charged))
+  self.assertTrue(any(x['borrow_cost']>0 for x in charged))
+ def test_unleveraged_cap_has_no_financing(self):
+  records,_=self.run_engine(cfg={**self.cfg,'gross_cap':1,'financing_rate':0.08})
+  self.assertTrue(all(x['financing_cost']<1e-15 for x in records))
+ def test_passive_uses_same_absolute_exposures(self):
+  _,active=self.run_engine()
+  _,passive=self.run_engine(cfg={**self.cfg,'mode':'passive_vol'})
+  for x,y in zip(active,passive):
+   self.assertAlmostEqual(abs(x['A']),y['A']);self.assertAlmostEqual(abs(x['B']),y['B'])
+ def test_invalid_financing_rejected(self):
+  with self.assertRaises(ValueError):self.run_engine(cfg={**self.cfg,'financing_rate':-1})
 if __name__=='__main__':unittest.main()
