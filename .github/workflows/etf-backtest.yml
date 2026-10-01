@@ -1,0 +1,96 @@
+name: EODHD ETF Backtest
+on:
+  workflow_dispatch:
+    inputs:
+      start_date:
+        description: "Datenbeginn (YYYY-MM-DD; inklusive Warmup)"
+        required: true
+        default: "2003-01-01"
+        type: string
+      end_date:
+        description: "Datenende (YYYY-MM-DD)"
+        required: true
+        default: "2025-12-31"
+        type: string
+permissions:
+  contents: read
+jobs:
+  backtest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      START_DATE: ${{ inputs.start_date }}
+      END_DATE: ${{ inputs.end_date }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Validate dates
+        run: |
+          python - <<'PY'
+          import os
+          from datetime import date
+          start = date.fromisoformat(os.environ["START_DATE"])
+          end = date.fromisoformat(os.environ["END_DATE"])
+          if start >= end:
+              raise SystemExit("Datenbeginn muss vor Datenende liegen.")
+          PY
+      - name: Run engine tests
+        run: python -m unittest discover -s tests -v
+      - name: Download ETF proxy data
+        env:
+          EODHD_API_TOKEN: ${{ secrets.EODHD_API_TOKEN }}
+        run: |
+          python download_eodhd.py --symbols SPY.US TLT.US GLD.US --start "$START_DATE" --end "$END_DATE" --out data/etf.csv
+      - name: Run 12 month baseline
+        run: |
+          python backtest.py --data data/etf.csv --manifest data/etf.manifest.json --config configs/baseline.json --out results/baseline
+      - name: Compare all 16 variants
+        run: |
+          python research.py --data data/etf.csv --out results/grid.csv
+      - name: Package reproducibility information
+        run: |
+          cp data/etf.manifest.json results/data-manifest.json
+          cp configs/baseline.json results/baseline-config.json
+          cp README.md results/METHODOLOGY.md
+          python - <<'PY'
+          import hashlib, json, os
+          from pathlib import Path
+          audit = {
+              "git_commit": os.environ["GITHUB_SHA"],
+              "data_sha256": hashlib.sha256(Path("data/etf.csv").read_bytes()).hexdigest(),
+              "kind": "etf_proxy",
+              "symbols": ["SPY.US", "TLT.US", "GLD.US"],
+              "requested_start": os.environ["START_DATE"],
+              "requested_end": os.environ["END_DATE"],
+              "limitations": [
+                  "Keine Futures-Replikation; ETF-Proxy mit festem heutigen Universum.",
+                  "Keine Short-Leihkosten oder Finanzierung; 40% Budget je Instrument kann Hebel erzeugen.",
+                  "Historie auf gemeinsame Handelstage begrenzt; GLD bestimmt den spaetesten Datenbeginn.",
+                  "PF und Trefferquote beziehen sich auf Monate, nicht einzelne Trades."
+              ]
+          }
+          Path("results/experiment.json").write_text(json.dumps(audit, indent=2))
+          PY
+      - name: Show baseline in Actions summary
+        run: |
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+          m = json.loads(Path("results/baseline/summary.json").read_text())
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as f:
+              f.write("## ETF-Proxy: SPY / TLT / GLD\n\nKeine Futures-Replikation. Short-Leihe und Finanzierung fehlen.\n\n")
+              f.write("| Kennzahl | Wert |\n|---|---:|\n")
+              for k in ["observations", "months", "cagr", "max_drawdown", "sharpe", "monthly_win_rate", "mean_daily_exposure"]:
+                  v = m[k]
+                  f.write(f"| {k} | {v:.4f} |\n" if isinstance(v, (int, float)) else f"| {k} | {v} |\n")
+              f.write("\nAlle 16 Varianten und Detaildaten im Ergebnis-Artifact.\n")
+          PY
+      - name: Upload results
+        uses: actions/upload-artifact@v4
+        with:
+          name: tsmom-etf-results-${{ github.run_id }}
+          path: results/
+          if-no-files-found: error
+          retention-days: 30
