@@ -39,6 +39,11 @@ def simulate(dates, symbols, panel, cfg):
         raise ValueError('Invalid capital, volatility or costs')
     if cfg['gross_cap'] is not None and cfg['gross_cap'] <= 0:
         raise ValueError('Invalid exposure cap')
+    financing_rate = cfg.get('financing_rate', 0.0)
+    borrow_rate = cfg.get('borrow_rate', 0.0)
+    mode = cfg.get('mode', 'momentum')
+    if financing_rate < 0 or borrow_rate < 0 or mode not in ('momentum', 'passive_vol', 'passive_equal'):
+        raise ValueError('Invalid cost rates or strategy mode')
     decay = cfg['vol_com'] / (1 + cfg['vol_com'])
     means = dict.fromkeys(symbols, 0.0)
     seconds = dict.fromkeys(symbols, 0.0)
@@ -47,6 +52,7 @@ def simulate(dates, symbols, panel, cfg):
     history = []
     records, logs = [], []
     equity = peak = cfg['initial_capital']
+    started = False
     start = date.fromisoformat(cfg['evaluation_start']) if cfg['evaluation_start'] else None
     end = date.fromisoformat(cfg['evaluation_end']) if cfg['evaluation_end'] else None
     for i, d in enumerate(dates):
@@ -58,14 +64,21 @@ def simulate(dates, symbols, panel, cfg):
         active = start is None or d >= start
         active = active and (end is None or d <= end)
         gross = sum(weights[s] * panel[d][s] for s in symbols)
-        cost = turnover * cfg['cost_bps'] / 10000
-        if active and any(weights.values()):
+        exposure = sum(map(abs, weights.values()))
+        calendar_days = (d - dates[i-1]).days if i else 1
+        financing = max(0.0, exposure - 1.0) * financing_rate * calendar_days / 365.25
+        borrow = sum(-w for w in weights.values() if w < 0) * borrow_rate * calendar_days / 365.25
+        trading_cost = turnover * cfg['cost_bps'] / 10000
+        cost = trading_cost + financing + borrow
+        started = started or (active and (any(weights.values()) or turnover > 0))
+        if active and started:
             net = gross - cost
             if net <= -1:
                 raise ValueError('Portfolio insolvency; leverage settings invalid for this path')
             equity *= 1 + net
             peak = max(peak, equity)
-            record = {'date':d.isoformat(), 'gross_return':gross,'cost':cost,'net_return':net,
+            record = {'date':d.isoformat(), 'gross_return':gross,'cost':cost,
+                      'trading_cost':trading_cost,'financing_cost':financing,'borrow_cost':borrow,'net_return':net,
                       'equity':equity,'drawdown':equity/peak-1,'gross_exposure':sum(map(abs, weights.values()))}
             record.update({s:weights[s]*panel[d][s] for s in symbols})
             records.append(record)
@@ -83,7 +96,10 @@ def simulate(dates, symbols, panel, cfg):
                     mass = 1-decay**i
                     variance = max(0, seconds[s]/mass-(means[s]/mass)**2)
                     vol = math.sqrt(cfg['annual_days']*variance)
-                    new[s] = (1 if momentum>0 else -1 if momentum<0 else 0)*cfg['vol_target']/vol/len(symbols) if vol>1e-10 else 0
+                    direction = (1 if momentum>0 else -1 if momentum<0 else 0) if mode == 'momentum' else 1
+                    new[s] = direction*cfg['vol_target']/vol/len(symbols) if vol>1e-10 else 0
+                    if mode == 'passive_equal':
+                        new[s] = 1.0/len(symbols)
                 exposure = sum(map(abs,new.values()))
                 cap = cfg['gross_cap']
                 if cap and exposure > cap:
