@@ -49,6 +49,9 @@ jobs:
       - name: Compare all 16 variants
         run: |
           python research.py --data data/etf.csv --out results/grid.csv
+      - name: Run exposure and financing robustness study
+        run: |
+          python robustness.py --data data/etf.csv --manifest data/etf.manifest.json --out results/robustness
       - name: Package reproducibility information
         run: |
           cp data/etf.manifest.json results/data-manifest.json
