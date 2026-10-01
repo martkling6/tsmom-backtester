@@ -47,3 +47,13 @@ Dieses Projekt getrennt als `tsmom-backtester` importieren. Nach Anlage eines le
 git remote add origin https://github.com/martkling6/tsmom-backtester.git
 git push -u origin main
 ```
+
+## Erweiterter ETF-Robustheitstest
+
+Der Actions-Workflow erstellt zusätzlich `robustness/comparison.csv`: 6/12 Monate, Gross-Cap 1.0/1.5, Finanzierung 0/4/8% p.a., Short-Leihe 0/2% p.a., Momentum versus passiv mit denselben absoluten Volatilitätsgewichten. Zusätzlich monatlich gleichgewichtetes Long-only-Portfolio ohne Hebel. Vollzeitraum, zwei Jahrzehntabschnitte und vier Fünfjahresabschnitte; tatsächliche Start-/Enddaten pro Zeile beachten.
+
+Finanzierung wird konservativ auf Bruttoexposition oberhalb 100% berechnet; Leihe auf Short-Exposition. Kosten laufen über Kalendertage inklusive Wochenenden. Zinssätze sind Sensitivitätsannahmen, keine historisch belegten Brokerkonditionen; keine Verzinsung von Cash, Sicherheiten oder Short-Erlösen. Dieselben absoluten Gewichte bedeuten nicht dieselbe realisierte Portfoliovolatilität. Die alte Baseline bleibt zur Vergleichbarkeit ohne diese Zusatzkosten. Zehn Tests prüfen unter anderem Kostenwirkung und Benchmark-Gewichte. Retrospektive Zeitabschnitte sind kein unabhängiger Out-of-Sample-Test.
+
+```sh
+python robustness.py --data data/etf.csv --manifest data/etf.manifest.json --out results/robustness
+```
